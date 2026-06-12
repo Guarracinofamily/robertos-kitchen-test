@@ -185,14 +185,14 @@ async function loadTodayStatus() {
       return;
     }
 
-    // Today is empty — carry forward SOS and BU from previous service date
+    // Today is empty: carry forward OK, SOS and BU from previous service date so the morning % reflects real readiness
     const prevDate = getPreviousServiceDate();
     console.log('[loadTodayStatus] No rows for ' + TODAY + ' — checking ' + prevDate + ' for carryover');
     const { data: prevRows } = await sb.from('prep_status').select('*').eq('service_date', prevDate);
 
     if (!prevRows || prevRows.length === 0) return;
 
-    const toCarry = prevRows.filter(r => r.status === 'sos' || r.status === 'bu');
+    const toCarry = prevRows.filter(r => r.status === 'sos' || r.status === 'bu' || r.status === 'ok');
     if (toCarry.length === 0) return;
 
     console.log('[loadTodayStatus] Carrying forward ' + toCarry.length + ' items from ' + prevDate);
@@ -215,7 +215,9 @@ async function loadTodayStatus() {
       state[mkId(row.station_key, row.subsection_key, row.dish_name, row.component_name)] = row.status;
     });
 
-    showCarryoverBanner(toCarry.length, prevDate);
+    const urgentCount = toCarry.filter(r => r.status === 'sos' || r.status === 'bu').length;
+    const okCount = toCarry.length - urgentCount;
+    showCarryoverBanner(toCarry.length, prevDate, okCount, urgentCount);
 
   } catch(err) {
     console.error('[loadTodayStatus] Error:', err);
@@ -228,10 +230,13 @@ function getPreviousServiceDate() {
   return formatDate(d);
 }
 
-function showCarryoverBanner(count, fromDate) {
+function showCarryoverBanner(count, fromDate, okCount, urgentCount) {
   const el = document.createElement('div');
   el.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#410207;color:#e1d3c2;text-align:center;padding:12px 20px;z-index:9998;font-size:13px;font-family:DM Sans,sans-serif;letter-spacing:0.02em;';
-  el.innerHTML = '📋 ' + count + ' unresolved items (SOS + BU) carried forward from ' + fromDate + ' — work SOS first.';
+  var parts = [];
+  if (okCount) parts.push(okCount + ' still OK from yesterday');
+  if (urgentCount) parts.push(urgentCount + ' unresolved (SOS + BU) \u2014 work SOS first');
+  el.innerHTML = '\ud83d\udccb Carried from ' + fromDate + ': ' + parts.join(' \u00b7 ');
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 7000);
 }
