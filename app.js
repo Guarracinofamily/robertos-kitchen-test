@@ -1599,7 +1599,6 @@ const SCHED_LOCK_TIMEOUT_MS = 5 * 60 * 1000; // auto-relock after 5 min idle
 let schedUnlocked      = false;
 let schedLockTimer     = null;
 let schedPendingAction = null;
-let schedBlankOverride = null;
 
 // ── Helpers ──
 function getMonday(d) {
@@ -1779,76 +1778,10 @@ function renderSchedView() {
 }
 
 // ── Weekly grid ──
-// ── Empty week state ──
-function renderSchedEmptyState(days) {
-  var fmt = function(d){ return d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}); };
-  document.getElementById('sch-grid-wrap').innerHTML =
-    '<div class="sch-empty-state">' +
-      '<div class="sch-empty-icon">&#128197;</div>' +
-      '<div class="sch-empty-title">No roster for this week</div>' +
-      '<div class="sch-empty-sub">' + fmt(days[0]) + ' – ' + fmt(days[6]) + '</div>' +
-      '<div class="sch-empty-actions">' +
-        '<button class="sch-empty-dup" onclick="schedDuplicateFromPrev()">&#10697; Duplicate previous week</button>' +
-        '<button class="sch-empty-blank" onclick="schedStartBlank()">Start blank roster</button>' +
-      '</div>' +
-    '</div>';
-}
-function schedStartBlank() {
-  if (!schedGuard(function(){ schedStartBlank(); })) return;
-  schedBlankOverride = formatDate(schedWeekStart);
-  renderSchedWeek();
-}
-async function schedDuplicateFromPrev() {
-  if (!schedGuard(function(){ schedDuplicateFromPrev(); })) return;
-  var days = []; for (var i = 0; i < 7; i++) days.push(addDays(schedWeekStart, i));
-  var upserts = [];
-  schedStaff.forEach(function(staff) {
-    days.forEach(function(d) {
-      var srcDate = formatDate(addDays(d, -7));
-      var tgtDate = formatDate(d);
-      var existing = schedRoster[schedRosterKey(staff.id, srcDate)];
-      if (!existing) return;
-      if (schedRoster[schedRosterKey(staff.id, tgtDate)]) return;
-      upserts.push({
-        staff_id: staff.id, work_date: tgtDate,
-        status: existing.status,
-        shift_start:  existing.shift_start  || null,
-        shift_end:    existing.shift_end    || null,
-        shift_start2: existing.shift_start2 || null,
-        shift_end2:   existing.shift_end2   || null,
-        notes: existing.notes || null,
-        station_override: existing.station_override || null,
-        updated_at: new Date().toISOString()
-      });
-      schedRoster[schedRosterKey(staff.id, tgtDate)] = Object.assign({}, existing, { work_date: tgtDate, id: null });
-    });
-  });
-  if (!upserts.length) { alert('Previous week is empty — nothing to duplicate. Use Start blank roster instead.'); return; }
-  renderSchedWeek();
-  if (!DEV_READ_ONLY) {
-    var res = await sb.from('roster').upsert(upserts, { onConflict: 'staff_id,work_date', ignoreDuplicates: true });
-    if (res.error) console.error('Duplicate-from-prev error:', res.error);
-  }
-}
-
-// ── Weekly grid ──
 function renderSchedWeek() {
   var today = formatDate(new Date());
   var days = []; for (var i = 0; i < 7; i++) days.push(addDays(schedWeekStart, i));
   var dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-
-  // Empty week -> show empty state instead of the grid
-  var hasEntries = false;
-  for (var ei = 0; ei < days.length && !hasEntries; ei++) {
-    var eds = formatDate(days[ei]);
-    for (var sxi = 0; sxi < schedStaff.length; sxi++) {
-      if (schedRoster[schedRosterKey(schedStaff[sxi].id, eds)]) { hasEntries = true; break; }
-    }
-  }
-  if (!hasEntries && schedBlankOverride !== formatDate(schedWeekStart)) {
-    renderSchedEmptyState(days);
-    return;
-  }
 
   var html = '<table class="sch-grid"><thead><tr>';
   html += '<th class="sch-th-name">Name</th><th class="sch-th-role">Role</th>';
@@ -2322,7 +2255,6 @@ async function schedDeleteWeek() {
   var to   = formatDate(addDays(schedWeekStart, 6));
   var fmt = function(d){ return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}); };
   if (!confirm('Delete ALL roster entries for ' + fmt(schedWeekStart) + ' – ' + fmt(addDays(schedWeekStart,6)) + '?\n\nStaff names stay — only the shifts of this week are removed. This cannot be undone.')) return;
-  schedBlankOverride = null;
   // Optimistic local removal
   Object.keys(schedRoster).forEach(function(k) {
     var d = k.split('|')[1];
