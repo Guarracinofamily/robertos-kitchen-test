@@ -2123,57 +2123,6 @@ function schedCancelRole(staffId, input) {
   renderSchedWeek();
 }
 
-// ── Fill week with standard pattern ──
-// Reads day-off pattern from Excel-derived defaults and fills 14:00–00:00 for working days
-async function schedFillWeek() {
-  if (!schedGuard(function(){ schedFillWeek(); })) return;
-  var days = [];
-  for (var i = 0; i < 7; i++) days.push(addDays(schedWeekStart, i));
-  var upserts = [];
-  var count = 0;
-
-  schedStaff.forEach(function(staff) {
-    days.forEach(function(d, i) {
-      var ds = formatDate(d);
-      var key = schedRosterKey(staff.id, ds);
-      var existing = schedRoster[key];
-      // Skip if: times already set, or explicitly marked as a leave type
-      if (existing) {
-        var hasLeave = ['wo','sl','al','ph','em','tr','cat'].indexOf(existing.status) !== -1;
-        var hasTimes = existing.shift_start && existing.shift_end;
-        if (hasLeave || hasTimes) return;
-      }
-      // Sunday (index 6) = day off by default, otherwise 14:00-00:00
-      var isSunday = i === 6;
-      var payload = {
-        staff_id: staff.id,
-        work_date: ds,
-        status: isSunday ? 'off' : 'working',
-        shift_start: isSunday ? null : '14:00:00',
-        shift_end:   isSunday ? null : '00:00:00',
-        notes: null,
-        updated_at: new Date().toISOString()
-      };
-      schedRoster[key] = payload;
-      upserts.push(payload);
-      count++;
-    });
-  });
-
-  renderSchedWeek();
-
-  if (!DEV_READ_ONLY && upserts.length) {
-    // Use upsert without ignoreDuplicates so it overwrites entries that have no times
-    var res = await sb.from('roster').upsert(upserts, { onConflict: 'staff_id,work_date' });
-    if (res.error) console.error('Fill error:', res.error);
-  }
-
-  var btn = document.getElementById('sch-fill-btn');
-  if (btn) {
-    btn.textContent = count + ' cells filled ✓';
-    setTimeout(function(){ btn.textContent = '⬇ Fill week'; }, 2500);
-  }
-}
 
 
 // ── Delete staff ──
