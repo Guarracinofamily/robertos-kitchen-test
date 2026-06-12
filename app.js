@@ -1599,7 +1599,6 @@ const SCHED_LOCK_TIMEOUT_MS = 5 * 60 * 1000; // auto-relock after 5 min idle
 let schedUnlocked      = false;
 let schedLockTimer     = null;
 let schedPendingAction = null;
-let schedCopyDirection = 'next';
 
 // ── Helpers ──
 function getMonday(d) {
@@ -2233,28 +2232,36 @@ async function schedSaveNewStaff(stationKey) {
 }
 
 // ── Copy to next week ──
-function schedDuplicateLastWeek() {
-  if (!schedGuard(function(){ schedDuplicateLastWeek(); })) return;
-  schedCopyDirection = 'prev';
-  var prevMon = addDays(schedWeekStart, -7);
-  var prevSun = addDays(schedWeekStart, -1);
-  var fmt = function(d){ return d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}); };
-  document.getElementById('sch-copy-msg').textContent =
-    'Duplicate last week (' + fmt(prevMon) + ' – ' + fmt(prevSun) +
-    ') into this week? Cells already filled will not be touched. Sick leave, emergency and public holidays will not be copied.';
-  document.getElementById('sch-copy-banner').style.display = 'flex';
-}
-
-function schedCopyToNextWeek() {
-  if (!schedGuard(function(){ schedCopyToNextWeek(); })) return;
-  schedCopyDirection = 'next';
+function schedDuplicateWeek() {
+  if (!schedGuard(function(){ schedDuplicateWeek(); })) return;
   var nextMon = addDays(schedWeekStart, 7);
   var nextSun = addDays(schedWeekStart, 13);
   var fmt = function(d){ return d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}); };
   document.getElementById('sch-copy-msg').textContent =
-    "Copy this week's roster to " + fmt(nextMon) + ' – ' + fmt(nextSun) +
-    '? Sick leave, emergency and public holidays will not be copied.';
+    'Duplicate this week into ' + fmt(nextMon) + ' – ' + fmt(nextSun) +
+    '? Cells already set next week will not be touched. Sick leave, emergency and public holidays will not be copied.';
   document.getElementById('sch-copy-banner').style.display = 'flex';
+}
+
+async function schedDeleteWeek() {
+  if (!schedGuard(function(){ schedDeleteWeek(); })) return;
+  var from = formatDate(schedWeekStart);
+  var to   = formatDate(addDays(schedWeekStart, 6));
+  var fmt = function(d){ return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}); };
+  if (!confirm('Delete ALL roster entries for ' + fmt(schedWeekStart) + ' – ' + fmt(addDays(schedWeekStart,6)) + '?\n\nStaff names stay — only the shifts of this week are removed. This cannot be undone.')) return;
+  // Optimistic local removal
+  Object.keys(schedRoster).forEach(function(k) {
+    var d = k.split('|')[1];
+    if (d >= from && d <= to) delete schedRoster[k];
+  });
+  renderSchedView();
+  if (!DEV_READ_ONLY) {
+    var res = await sb.from('roster').delete().gte('work_date', from).lte('work_date', to);
+    if (res.error) {
+      console.error('Delete week error:', res.error);
+      loadSchedData().then(renderSchedView);
+    }
+  }
 }
 function schedDismissCopy() {
   document.getElementById('sch-copy-banner').style.display = 'none';
@@ -2263,13 +2270,10 @@ async function schedConfirmCopy() {
   schedDismissCopy();
   var days = []; for (var i = 0; i < 7; i++) days.push(addDays(schedWeekStart, i));
   var upserts = [];
-  var fromPrev = schedCopyDirection === 'prev';
   schedStaff.forEach(function(staff) {
     days.forEach(function(d) {
-      // 'next': source = this week, target = next week
-      // 'prev': source = last week,  target = this week
-      var srcDate = fromPrev ? formatDate(addDays(d, -7)) : formatDate(d);
-      var tgtDate = fromPrev ? formatDate(d) : formatDate(addDays(d, 7));
+      var srcDate = formatDate(d);
+      var tgtDate = formatDate(addDays(d, 7));
       var existing = schedRoster[schedRosterKey(staff.id, srcDate)];
       if (!existing) return;
       if (['sl','em','ph'].indexOf(existing.status) !== -1) return;
@@ -2291,9 +2295,9 @@ async function schedConfirmCopy() {
   });
   if (!DEV_READ_ONLY && upserts.length) {
     var res = await sb.from('roster').upsert(upserts, { onConflict: 'staff_id,work_date', ignoreDuplicates: true });
-    if (res.error) console.error('Copy error:', res.error);
+    if (res.error) console.error('Duplicate error:', res.error);
   }
-  if (!fromPrev) schedWeekStart = addDays(schedWeekStart, 7);
+  schedWeekStart = addDays(schedWeekStart, 7);
   await loadSchedData();
   renderSchedView();
 }
