@@ -1594,7 +1594,7 @@ let schedEditTarget  = null;
 let schedRTChannel   = null;
 
 // ── Edit lock ──
-const SCHED_PIN = '2468'; // TEMP — change before LIVE push
+const SCHED_PIN = '2468'; // schedule edit passcode
 const SCHED_LOCK_TIMEOUT_MS = 5 * 60 * 1000; // auto-relock after 5 min idle
 let schedUnlocked      = false;
 let schedLockTimer     = null;
