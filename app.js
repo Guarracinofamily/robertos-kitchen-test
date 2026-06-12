@@ -2239,7 +2239,7 @@ function schedDuplicateWeek() {
   var fmt = function(d){ return d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}); };
   document.getElementById('sch-copy-msg').textContent =
     'Duplicate this week into ' + fmt(nextMon) + ' – ' + fmt(nextSun) +
-    '? Cells already set next week will not be touched. Sick leave, emergency and public holidays will not be copied.';
+    '? An exact copy of every shift and status will be created. Cells already set next week will not be touched.';
   document.getElementById('sch-copy-banner').style.display = 'flex';
 }
 
@@ -2276,7 +2276,6 @@ async function schedConfirmCopy() {
       var tgtDate = formatDate(addDays(d, 7));
       var existing = schedRoster[schedRosterKey(staff.id, srcDate)];
       if (!existing) return;
-      if (['sl','em','ph'].indexOf(existing.status) !== -1) return;
       // Never overwrite a target cell that already has an entry
       if (schedRoster[schedRosterKey(staff.id, tgtDate)]) return;
       upserts.push({
