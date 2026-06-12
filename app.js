@@ -425,7 +425,10 @@ function currentReportRows(){
   return [...prepRows(),...checklistRows()];
 }
 function criticalRows(){
-  return currentReportRows().filter(r=>['sos','bu','review','discard'].includes(r.status));
+  const order={sos:0,discard:0,review:1};
+  return currentReportRows()
+    .filter(r=>['sos','review','discard'].includes(r.status))
+    .sort((a,b)=>order[a.status]-order[b.status]);
 }
 
 // â”€â”€ TABS â”€â”€
