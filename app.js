@@ -2301,13 +2301,19 @@ async function schedSaveNewStaff(stationKey) {
 // ── Copy to next week ──
 function schedDuplicateWeek() {
   if (!schedGuard(function(){ schedDuplicateWeek(); })) return;
-  var nextMon = addDays(schedWeekStart, 7);
-  var nextSun = addDays(schedWeekStart, 13);
-  var fmt = function(d){ return d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}); };
-  document.getElementById('sch-copy-msg').textContent =
-    'Duplicate this week into ' + fmt(nextMon) + ' – ' + fmt(nextSun) +
-    '? An exact copy of every shift and status will be created. Cells already set next week will not be touched.';
-  document.getElementById('sch-copy-banner').style.display = 'flex';
+  var fmt = function(d){ return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}); };
+  document.getElementById('sch-dup-src').textContent =
+    'Source: ' + fmt(schedWeekStart) + ' \u2013 ' + fmt(addDays(schedWeekStart, 6));
+  document.getElementById('sch-dup-date').value = formatDate(addDays(schedWeekStart, 7));
+  document.getElementById('sch-dup-overwrite').checked = false;
+  document.getElementById('sch-dup-modal').style.display = 'flex';
+}
+function schedCloseDup(e) {
+  if (e && e.target !== document.getElementById('sch-dup-modal')) return;
+  document.getElementById('sch-dup-modal').style.display = 'none';
+}
+function schedCancelDup() {
+  document.getElementById('sch-dup-modal').style.display = 'none';
 }
 
 async function schedDeleteWeek() {
@@ -2334,18 +2340,41 @@ async function schedDeleteWeek() {
 function schedDismissCopy() {
   document.getElementById('sch-copy-banner').style.display = 'none';
 }
-async function schedConfirmCopy() {
-  schedDismissCopy();
+async function schedConfirmDuplicate() {
+  var v = document.getElementById('sch-dup-date').value;
+  if (!v) { alert('Pick a target week first.'); return; }
+  var target = getMonday(new Date(v + 'T12:00:00'));
+  var tFrom = formatDate(target);
+  var tTo   = formatDate(addDays(target, 6));
+  if (tFrom === formatDate(schedWeekStart)) { alert('Target week is the same as the source week.'); return; }
+  var overwrite = document.getElementById('sch-dup-overwrite').checked;
+  document.getElementById('sch-dup-modal').style.display = 'none';
+
+  var offsetDays = Math.round((target - schedWeekStart) / 86400000);
   var days = []; for (var i = 0; i < 7; i++) days.push(addDays(schedWeekStart, i));
+
+  // Existing entries in target week (queried live, works for any week)
+  var existingSet = {};
+  if (overwrite) {
+    if (!DEV_READ_ONLY) {
+      var del = await sb.from('roster').delete().gte('work_date', tFrom).lte('work_date', tTo);
+      if (del.error) { console.error('Overwrite clear error:', del.error); alert('Could not clear the target week. Nothing was copied.'); return; }
+    }
+  } else {
+    var ex = await sb.from('roster').select('staff_id,work_date').gte('work_date', tFrom).lte('work_date', tTo);
+    (ex.data || []).forEach(function(r) {
+      existingSet[r.staff_id + '|' + String(r.work_date).substring(0,10)] = true;
+    });
+  }
+
   var upserts = [];
   schedStaff.forEach(function(staff) {
     days.forEach(function(d) {
       var srcDate = formatDate(d);
-      var tgtDate = formatDate(addDays(d, 7));
+      var tgtDate = formatDate(addDays(d, offsetDays));
       var existing = schedRoster[schedRosterKey(staff.id, srcDate)];
       if (!existing) return;
-      // Never overwrite a target cell that already has an entry
-      if (schedRoster[schedRosterKey(staff.id, tgtDate)]) return;
+      if (!overwrite && existingSet[staff.id + '|' + tgtDate]) return;
       upserts.push({
         staff_id: staff.id, work_date: tgtDate,
         status: existing.status,
@@ -2357,14 +2386,15 @@ async function schedConfirmCopy() {
         station_override: existing.station_override || null,
         updated_at: new Date().toISOString()
       });
-      schedRoster[schedRosterKey(staff.id, tgtDate)] = Object.assign({}, existing, { work_date: tgtDate, id: null });
     });
   });
-  if (!DEV_READ_ONLY && upserts.length) {
-    var res = await sb.from('roster').upsert(upserts, { onConflict: 'staff_id,work_date', ignoreDuplicates: true });
+  if (!upserts.length) { alert('Nothing to duplicate \u2014 the source week is empty or the target is fully set.'); return; }
+  if (!DEV_READ_ONLY) {
+    var res = await sb.from('roster').upsert(upserts, { onConflict: 'staff_id,work_date', ignoreDuplicates: !overwrite });
     if (res.error) console.error('Duplicate error:', res.error);
   }
-  schedWeekStart = addDays(schedWeekStart, 7);
+  // Jump to the target week to review
+  schedWeekStart = target;
   await loadSchedData();
   renderSchedView();
 }
